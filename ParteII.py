@@ -1,4 +1,3 @@
-#Cloned from "Naive Bayes High Low Return Prediction Algorithm based on Jim Obreen's Post"
 #########################################################################################
 # We use a Gaussian Naive Bayes model to predict if a stock will have a high return 
 # or low return next Monday (num_holding_days = 5),  using as input decision variables 
@@ -23,6 +22,9 @@ from quantopian.pipeline.data.builtin import USEquityPricing
 from quantopian.pipeline.filters import QTradableStocksUS
 from quantopian.optimize import TargetWeights
 from quantopian.pipeline.factors import Returns
+from quantopian.pipeline.data import EquityPricing
+from quantopian.pipeline.data.psychsignal import (twitter_withretweets)
+import quantopian.pipeline.data.factset.estimates as fe
 
 # The basics
 import pandas as pd
@@ -133,8 +135,35 @@ class Predictor(CustomFactor):
 def make_pipeline():
 
     universe = QTradableStocksUS()
-
-    pipe = Pipeline(columns={'Model': Predictor(window_length=days_for_fundamentals_analysis, mask=universe)},screen = universe)
+    
+    #Se importa la libreria para tener en cuenta las recomendaciones del Broker
+    #Estos datos solo estan disponibles hasta Febrero del 2019.
+    fe_rec = fe.ConsensusRecommendations
+    
+    #Obtenemos el ultimo precio de cierre del dia, de todas las acciones    
+    yesterday_close = EquityPricing.close.latest
+    #Obtenemos el ultimo volumen de operaciones diarias, para todas las acciones
+    yesterday_volume = EquityPricing.volume.latest
+    #Obtiene el conjunto de datos para los mensajes de twitter, incluyendo re-tweets
+    #Se realiza la proporcion entre mensajes relacionados con el alza sobre
+    #el total de mensajes
+    tweets_prop = (twitter_withretweets.bull_scored_messages.latest/
+            twitter_withretweets.total_scanned_messages.latest)
+    
+    #suma entre ultimo precio de cierre del dia y ultimo volumen de operaciones diarias
+    last_prices = yesterday_close.zscore()+yesterday_volume.zscore()
+    
+    #recomendaciones de compra
+    rec_buy  = fe_rec.buy.latest
+    #recomenraciones de venta
+    rec_sell = fe_rec.sell.latest
+    #diferencia en las recomendaciones
+    recomendacion = (rec_buy-rec_sell).zscore()
+    
+    #Se agregan las columnas 'Prices', 'Tweets' y 'DiferenciaRec'
+    #De esta manera se tendran 4 factores en el pipeline, y se han agrupado segun 
+    #caracteristicas generales de las variables seleccionadas
+    pipe = Pipeline(columns={'Model': Predictor(window_length=days_for_fundamentals_analysis, mask=universe), 'Prices':last_prices, 'Tweets': tweets_prop, 'DiferenciaRec':recomendacion},screen = universe)
 
     return pipe
 
